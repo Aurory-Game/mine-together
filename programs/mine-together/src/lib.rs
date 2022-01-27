@@ -94,4 +94,6 @@ pub enum ErrorCode {
     NotAdmin, // 6000, 0x1770
     #[msg("Program freezed")]
     ProgramFreezed, // 6001, 0x1771
+    #[msg("Token transfer failed")]
+    TokenTransferFailed, // 6002, 0x1772
 }
