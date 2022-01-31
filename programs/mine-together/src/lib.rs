@@ -74,6 +74,7 @@ pub mod mine_together {
     pub fn remove_miner(
         ctx: Context<RemoveMiner>,
         _nonce_mine_together: u8,
+        _miner_index: u32,
         _nonce_miner: u8,
     ) -> ProgramResult {
         Ok(())
@@ -82,6 +83,7 @@ pub mod mine_together {
     pub fn purchase_miner(
         ctx: Context<PurchaseMiner>,
         _nonce_mine_together: u8,
+        _miner_index: u32,
         _nonce_miner: u8,
         _nonce_aury_vault: u8,
     ) -> ProgramResult {
@@ -225,7 +227,7 @@ pub struct CreateMiner<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(_nonce_mine_together: u8, _nonce_miner: u8)]
+#[instruction(_nonce_mine_together: u8, _miner_index: u32, _nonce_miner: u8)]
 pub struct RemoveMiner<'info> {
     #[account(
         mut,
@@ -238,7 +240,7 @@ pub struct RemoveMiner<'info> {
     #[account(
         mut,
         close = admin,
-        seeds = [ mine_together_account.miner_counter.to_string().as_ref(), constants::MINER_PDA_SEED.as_ref() ],
+        seeds = [ _miner_index.to_string().as_ref(), constants::MINER_PDA_SEED.as_ref() ],
         bump = _nonce_miner,
         constraint = miner_account.owner != Pubkey::default() @ ErrorCode::MinerPurhcased,
     )]
@@ -250,7 +252,7 @@ pub struct RemoveMiner<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(_nonce_mine_together: u8, _nonce_miner: u8, _nonce_aury_vault: u8)]
+#[instruction(_nonce_mine_together: u8, _miner_index: u32, _nonce_miner: u8, _nonce_aury_vault: u8)]
 pub struct PurchaseMiner<'info> {
     #[account(
         seeds = [ constants::MINE_TOGETHER_PDA_SEED.as_ref() ],
@@ -261,7 +263,7 @@ pub struct PurchaseMiner<'info> {
 
     #[account(
         mut,
-        seeds = [ mine_together_account.miner_counter.to_string().as_ref(), constants::MINER_PDA_SEED.as_ref() ],
+        seeds = [ _miner_index.to_string().as_ref(), constants::MINER_PDA_SEED.as_ref() ],
         bump = _nonce_miner,
         constraint = miner_account.owner != Pubkey::default() @ ErrorCode::MinerPurhcased,
     )]
