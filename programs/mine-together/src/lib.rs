@@ -10,6 +10,7 @@ declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 pub mod constants {
     pub const AURY_TOKEN_MINT_PUBKEY: &str = "AURYydfxJib1ZkTir1Jn1J9ECYUtjb6rKQVmtYaixWPP";
     pub const MINE_TOGETHER_PDA_SEED: &[u8] = b"MINE_TOGETHER";
+    pub const MINE_PDA_SEED: &[u8] = b"MINE_TOGETHER_MINE";
     pub const MINER_PDA_SEED: &[u8] = b"MINE_TOGETHER_MINER";
 }
 
@@ -17,12 +18,17 @@ pub mod constants {
 pub mod constants {
     pub const AURY_TOKEN_MINT_PUBKEY: &str = "teST1ieLrLdr4MJPZ7i8mgSCLQ7rTrPRjNnyFdHFaz9";
     pub const MINE_TOGETHER_PDA_SEED: &[u8] = b"MINE_TOGETHER";
+    pub const MINE_PDA_SEED: &[u8] = b"MINE_TOGETHER_MINE";
     pub const MINER_PDA_SEED: &[u8] = b"MINE_TOGETHER_MINER";
 }
 
 #[program]
 pub mod mine_together {
     use super::*;
+
+    pub const FEE_MULTIPLIER: u64 = 10000; // 100%
+    pub const MAX_MINE_FEE: u64 = 2000; // 20%
+    pub const MIN_MINE_FEE: u64 = 0; // 0%
 
     pub fn initialize(
         ctx: Context<Initialize>,
@@ -97,6 +103,50 @@ pub mod mine_together {
 
         // update the miner
         miner.owner = *aury_from_authority.key;
+
+        Ok(())
+    }
+
+    pub fn create_mine(
+        ctx: Context<CreateMine>,
+        _nonce_mine_together: u8,
+        _nonce_mine: u8,
+        fee: u64,
+    ) -> ProgramResult {
+        if !(fee >= MIN_MINE_FEE && fee <= MAX_MINE_FEE) {
+            return Err(ErrorCode::InvalidMineFee.into());
+        }
+
+        let mine_together = &mut ctx.accounts.mine_together_account;
+        let mine = &mut ctx.accounts.mine_account;
+        let owner = &ctx.accounts.owner;
+
+        // update the mine
+        mine.index = mine_together.mine_counter;
+        mine.owner = *owner.key;
+        mine.fee = fee;
+
+        // update the mine together
+        mine_together.mine_counter += 1;
+
+        Ok(())
+    }
+
+    #[access_control(ctx.accounts.mine_account.assert_owner(&ctx.accounts.owner))]
+    pub fn update_mine_fee(
+        ctx: Context<UpdateMineFee>,
+        _mine_index: u32,
+        _nonce_mine: u8,
+        fee: u64,
+    ) -> ProgramResult {
+        if !(fee >= MIN_MINE_FEE && fee <= MAX_MINE_FEE) {
+            return Err(ErrorCode::InvalidMineFee.into());
+        }
+
+        let mine = &mut ctx.accounts.mine_account;
+
+        // update the mine
+        mine.fee = fee;
 
         Ok(())
     }
@@ -237,6 +287,44 @@ pub struct PurchaseMiner<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+#[derive(Accounts)]
+#[instruction(_nonce_mine_together: u8, _nonce_mine: u8)]
+pub struct CreateMine<'info> {
+    #[account(
+        mut,
+        seeds = [ constants::MINE_TOGETHER_PDA_SEED.as_ref() ],
+        bump = _nonce_mine_together,
+        constraint = !mine_together_account.freeze_program @ ErrorCode::ProgramFreezed
+    )]
+    pub mine_together_account: Box<Account<'info, MineTogetherAccount>>,
+
+    #[account(
+        init,
+        payer = owner,
+        seeds = [ mine_together_account.mine_counter.to_string().as_ref(), constants::MINE_PDA_SEED.as_ref() ],
+        bump = _nonce_mine,
+    )]
+    pub mine_account: Box<Account<'info, MineAccount>>,
+
+    pub owner: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+#[instruction(_mine_index: u32, _nonce_mine: u8)]
+pub struct UpdateMineFee<'info> {
+    #[account(
+        mut,
+        seeds = [ _mine_index.to_string().as_ref(), constants::MINE_PDA_SEED.as_ref() ],
+        bump = _nonce_mine,
+    )]
+    pub mine_account: Box<Account<'info, MineAccount>>,
+
+    pub owner: Signer<'info>,
+}
+
 #[account]
 #[derive(Default)]
 pub struct MineTogetherAccount {
@@ -250,6 +338,7 @@ pub struct MineTogetherAccount {
 #[derive(Default)]
 pub struct MineAccount {
     pub index: u32,
+    pub owner: Pubkey,
     pub fee: u64,
     pub total_amount: u64,
     pub x_total_amount: u64,
@@ -276,6 +365,26 @@ impl MineTogetherAccount {
     }
 }
 
+impl MineAccount {
+    pub fn assert_owner(&self, signer: &Signer) -> ProgramResult {
+        if self.owner != *signer.key {
+            return Err(ErrorCode::NotMineOwner.into());
+        }
+
+        Ok(())
+    }
+}
+
+impl MinerAccount {
+    pub fn assert_owner(&self, signer: &Signer) -> ProgramResult {
+        if self.owner != *signer.key {
+            return Err(ErrorCode::NotMinerOwner.into());
+        }
+
+        Ok(())
+    }
+}
+
 #[error]
 pub enum ErrorCode {
     #[msg("Not admin")]
@@ -286,4 +395,10 @@ pub enum ErrorCode {
     MinerPurhcased, // 6002, 0x1772
     #[msg("Token transfer failed")]
     TokenTransferFailed, // 6003, 0x1773
+    #[msg("Invalid mine fee")]
+    InvalidMineFee, // 6004, 0x1774
+    #[msg("Not mine owner")]
+    NotMineOwner, // 6005, 0x1775
+    #[msg("Not miner owner")]
+    NotMinerOwner, // 6006, 0x1776
 }
