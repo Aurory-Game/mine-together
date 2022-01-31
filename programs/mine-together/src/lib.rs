@@ -1,3 +1,6 @@
+pub mod utils;
+
+use crate::utils::*;
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
@@ -32,6 +35,14 @@ pub mod mine_together {
     }
 
     #[access_control(ctx.accounts.mine_together_account.assert_admin(&ctx.accounts.admin))]
+    pub fn toggle_freeze_program(ctx: Context<FreezeProgram>, _nonce_staking: u8) -> ProgramResult {
+        ctx.accounts.mine_together_account.freeze_program =
+            !ctx.accounts.mine_together_account.freeze_program;
+
+        Ok(())
+    }
+
+    #[access_control(ctx.accounts.mine_together_account.assert_admin(&ctx.accounts.admin))]
     pub fn create_miner(
         ctx: Context<CreateMiner>,
         _nonce_mine_together: u8,
@@ -42,10 +53,12 @@ pub mod mine_together {
         let mine_together = &mut ctx.accounts.mine_together_account;
         let miner = &mut ctx.accounts.miner_account;
 
+        // update the miner
         miner.index = mine_together.miner_counter;
         miner.cost = cost;
         miner.duration = duration;
 
+        // update the mine together
         mine_together.miner_counter += 1;
 
         Ok(())
@@ -57,6 +70,34 @@ pub mod mine_together {
         _nonce_mine_together: u8,
         _nonce_miner: u8,
     ) -> ProgramResult {
+        Ok(())
+    }
+
+    pub fn purchase_miner(
+        ctx: Context<PurchaseMiner>,
+        _nonce_mine_together: u8,
+        _nonce_miner: u8,
+        _nonce_aury_vault: u8,
+    ) -> ProgramResult {
+        let miner = &mut ctx.accounts.miner_account;
+        let aury_vault = &mut ctx.accounts.aury_vault;
+        let aury_from = &mut ctx.accounts.aury_from;
+        let aury_from_authority = &ctx.accounts.aury_from_authority;
+        let token_program = &ctx.accounts.token_program;
+
+        // transfer aury to the vault
+        spl_token_transfer(TokenTransferParams {
+            source: aury_from.to_account_info(),
+            destination: aury_vault.to_account_info(),
+            amount: miner.cost,
+            authority: aury_from_authority.to_account_info(),
+            authority_signer_seeds: &[],
+            token_program: token_program.to_account_info(),
+        })?;
+
+        // update the miner
+        miner.owner = *aury_from_authority.key;
+
         Ok(())
     }
 }
@@ -96,12 +137,26 @@ pub struct Initialize<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(_nonce_mine_together: u8)]
+pub struct FreezeProgram<'info> {
+    #[account(
+        mut,
+        seeds = [ constants::MINE_TOGETHER_PDA_SEED.as_ref() ],
+        bump = _nonce_mine_together,
+    )]
+    pub mine_together_account: Box<Account<'info, MineTogetherAccount>>,
+
+    pub admin: Signer<'info>,
+}
+
+#[derive(Accounts)]
 #[instruction(_nonce_mine_together: u8, _nonce_miner: u8)]
 pub struct CreateMiner<'info> {
     #[account(
         mut,
         seeds = [ constants::MINE_TOGETHER_PDA_SEED.as_ref() ],
         bump = _nonce_mine_together,
+        constraint = !mine_together_account.freeze_program @ ErrorCode::ProgramFreezed
     )]
     pub mine_together_account: Box<Account<'info, MineTogetherAccount>>,
 
@@ -126,6 +181,7 @@ pub struct RemoveMiner<'info> {
         mut,
         seeds = [ constants::MINE_TOGETHER_PDA_SEED.as_ref() ],
         bump = _nonce_mine_together,
+        constraint = !mine_together_account.freeze_program @ ErrorCode::ProgramFreezed
     )]
     pub mine_together_account: Box<Account<'info, MineTogetherAccount>>,
 
@@ -134,13 +190,51 @@ pub struct RemoveMiner<'info> {
         close = admin,
         seeds = [ mine_together_account.miner_counter.to_string().as_ref(), constants::MINER_PDA_SEED.as_ref() ],
         bump = _nonce_miner,
-        constraint = miner_account.x_aury_amount == 0,
+        constraint = miner_account.owner != Pubkey::default() @ ErrorCode::MinerPurhcased,
     )]
     pub miner_account: Box<Account<'info, MinerAccount>>,
 
     pub admin: Signer<'info>,
 
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(_nonce_mine_together: u8, _nonce_miner: u8, _nonce_aury_vault: u8)]
+pub struct PurchaseMiner<'info> {
+    #[account(
+        seeds = [ constants::MINE_TOGETHER_PDA_SEED.as_ref() ],
+        bump = _nonce_mine_together,
+        constraint = !mine_together_account.freeze_program @ ErrorCode::ProgramFreezed
+    )]
+    pub mine_together_account: Box<Account<'info, MineTogetherAccount>>,
+
+    #[account(
+        mut,
+        seeds = [ mine_together_account.miner_counter.to_string().as_ref(), constants::MINER_PDA_SEED.as_ref() ],
+        bump = _nonce_miner,
+        constraint = miner_account.owner != Pubkey::default() @ ErrorCode::MinerPurhcased,
+    )]
+    pub miner_account: Box<Account<'info, MinerAccount>>,
+
+    #[account(
+        address = constants::AURY_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap(),
+    )]
+    pub aury_mint: Box<Account<'info, Mint>>,
+
+    #[account(
+        mut,
+        seeds = [ constants::AURY_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap().as_ref() ],
+        bump = _nonce_aury_vault,
+    )]
+    pub aury_vault: Box<Account<'info, TokenAccount>>,
+
+    #[account(mut)]
+    pub aury_from: Box<Account<'info, TokenAccount>>,
+
+    pub aury_from_authority: Signer<'info>,
+
+    pub token_program: Program<'info, Token>,
 }
 
 #[account]
@@ -180,14 +274,6 @@ impl MineTogetherAccount {
 
         Ok(())
     }
-
-    pub fn assert_freeze_program(&self) -> ProgramResult {
-        if self.freeze_program {
-            return Err(ErrorCode::ProgramFreezed.into());
-        }
-
-        Ok(())
-    }
 }
 
 #[error]
@@ -196,6 +282,8 @@ pub enum ErrorCode {
     NotAdmin, // 6000, 0x1770
     #[msg("Program freezed")]
     ProgramFreezed, // 6001, 0x1771
+    #[msg("Miner is already purchased")]
+    MinerPurhcased, // 6002, 0x1772
     #[msg("Token transfer failed")]
-    TokenTransferFailed, // 6002, 0x1772
+    TokenTransferFailed, // 6003, 0x1773
 }
