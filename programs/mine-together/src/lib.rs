@@ -3,6 +3,7 @@ pub mod utils;
 use crate::utils::*;
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
+use std::convert::TryInto;
 
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 
@@ -149,6 +150,47 @@ pub mod mine_together {
 
         // update the mine
         mine.fee = fee;
+
+        Ok(())
+    }
+
+    pub fn add_miners_to_mine<'a, 'b, 'c, 'info>(
+        ctx: Context<'a, 'b, 'c, 'info, AddMinersToMine<'info>>,
+        mine_index: u32,
+        _nonce_mine: u8,
+    ) -> ProgramResult {
+        let mine = &mut ctx.accounts.mine_account;
+        let owner = &ctx.accounts.owner;
+        let remaining_accounts = ctx.remaining_accounts;
+        let remaining_accounts_length = ctx.remaining_accounts.len();
+
+        let mut index = 0;
+        while index < remaining_accounts_length {
+            let miner = &mut Account::<'_, MinerAccount>::try_from(&remaining_accounts[index])?;
+            miner.assert_owner(owner)?;
+            miner.assert_mining()?;
+
+            if mine.total_amount == 0 || mine.x_total_amount == 0 {
+                mine.x_total_amount += miner.cost;
+                miner.x_aury_amount += miner.cost;
+            } else {
+                let what: u64 = (miner.cost as u128)
+                    .checked_mul(mine.x_total_amount as u128)
+                    .unwrap()
+                    .checked_div(mine.total_amount as u128)
+                    .unwrap()
+                    .try_into()
+                    .unwrap();
+
+                mine.x_total_amount += what;
+                miner.x_aury_amount += what;
+            }
+            mine.total_amount += miner.cost;
+            miner.mine_index = mine_index;
+            miner.mining_start_at = Clock::get().unwrap().unix_timestamp as u64;
+
+            index += 1;
+        }
 
         Ok(())
     }
@@ -327,6 +369,19 @@ pub struct UpdateMineFee<'info> {
     pub owner: Signer<'info>,
 }
 
+#[derive(Accounts)]
+#[instruction(mine_index: u32, _nonce_mine: u8)]
+pub struct AddMinersToMine<'info> {
+    #[account(
+        mut,
+        seeds = [ mine_index.to_string().as_ref(), constants::MINE_PDA_SEED.as_ref() ],
+        bump = _nonce_mine,
+    )]
+    pub mine_account: Box<Account<'info, MineAccount>>,
+
+    pub owner: Signer<'info>,
+}
+
 #[account]
 #[derive(Default)]
 pub struct MineTogetherAccount {
@@ -352,6 +407,7 @@ pub struct MinerAccount {
     pub index: u32,
     pub cost: u64,
     pub duration: u64,
+    pub mine_index: u32,
     pub mining_start_at: u64,
     pub owner: Pubkey,
     pub x_aury_amount: u64,
@@ -385,6 +441,14 @@ impl MinerAccount {
 
         Ok(())
     }
+
+    pub fn assert_mining(&self) -> ProgramResult {
+        if self.mining_start_at > 0 {
+            return Err(ErrorCode::MinerMiningStarted.into());
+        }
+
+        Ok(())
+    }
 }
 
 #[error]
@@ -403,4 +467,6 @@ pub enum ErrorCode {
     NotMineOwner, // 6005, 0x1775
     #[msg("Not miner owner")]
     NotMinerOwner, // 6006, 0x1776
+    #[msg("Miner mining started")]
+    MinerMiningStarted, // 6007, 0x1777
 }
