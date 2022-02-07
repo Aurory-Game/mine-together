@@ -185,6 +185,7 @@ pub mod mine_together {
                 mine.x_total_amount += what;
                 miner.x_aury_amount += what;
             }
+            mine.power += miner.cost;
             mine.total_amount += miner.cost;
             miner.mine_index = mine_index;
             miner.mining_start_at = Clock::get().unwrap().unix_timestamp as u64;
@@ -397,6 +398,7 @@ pub struct MineAccount {
     pub index: u32,
     pub owner: Pubkey,
     pub fee: u64,
+    pub power: u64,
     pub total_amount: u64,
     pub x_total_amount: u64,
 }
