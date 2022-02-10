@@ -1,15 +1,8 @@
-use anchor_lang::{prelude::*, solana_program::program_pack::Pack};
-use spl_token::instruction::AuthorityType;
 use {
     crate::*,
     anchor_lang::{
         prelude::{AccountInfo, ProgramResult},
-        solana_program::{
-            program::{invoke, invoke_signed},
-            pubkey::Pubkey,
-            rent::Rent,
-            system_instruction,
-        },
+        solana_program::program::invoke_signed,
     },
 };
 
