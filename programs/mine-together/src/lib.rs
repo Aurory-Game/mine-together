@@ -23,6 +23,8 @@ pub mod constants {
     pub const MINER_PDA_SEED: &[u8] = b"MINE_TOGETHER_MINER";
 }
 
+const SHARES_LIMIT: usize = 400;
+
 #[program]
 pub mod mine_together {
     use super::*;
@@ -54,20 +56,35 @@ pub mod mine_together {
         ctx: Context<CreateMiner>,
         _nonce_mine_together: u8,
         _nonce_miner: u8,
+        name: String,
         cost: u64,
         duration: u64,
+        limit: u64,
     ) -> ProgramResult {
         let mine_together = &mut ctx.accounts.mine_together_account;
         let miner = &mut ctx.accounts.miner_account;
 
         // update the miner
         miner.index = mine_together.miner_counter;
+        miner.name = name;
         miner.cost = cost;
         miner.duration = duration;
+        miner.limit = limit;
 
         // update the mine together
         mine_together.miner_counter += 1;
 
+        Ok(())
+    }
+
+    #[access_control(ctx.accounts.mine_together_account.assert_admin(&ctx.accounts.admin))]
+    pub fn toggle_freeze_miner(
+        ctx: Context<FreezeMiner>,
+        _nonce_mine_together: u8,
+        _miner_index: u32,
+        _nonce_miner: u8,
+    ) -> ProgramResult {
+        ctx.accounts.miner_account.frozen_sells = !ctx.accounts.miner_account.frozen_sells;
         Ok(())
     }
 
@@ -84,7 +101,7 @@ pub mod mine_together {
     pub fn purchase_miner(
         ctx: Context<PurchaseMiner>,
         _nonce_mine_together: u8,
-        miner_index: u32,
+        _miner_index: u32,
         _nonce_miner: u8,
         _nonce_user_miner: u8,
         _nonce_aury_vault: u8,
@@ -97,11 +114,15 @@ pub mod mine_together {
         let aury_from_authority = &ctx.accounts.aury_from_authority;
         let token_program = &ctx.accounts.token_program;
 
+        miner.assert_purchasable(amount)?;
+
         // transfer aury to the vault
+        let power = miner.cost * amount;
+
         spl_token_transfer(TokenTransferParams {
             source: aury_from.to_account_info(),
             destination: aury_vault.to_account_info(),
-            amount: miner.cost * amount,
+            amount: power,
             authority: aury_from_authority.to_account_info(),
             authority_signer_seeds: &[],
             token_program: token_program.to_account_info(),
@@ -109,14 +130,9 @@ pub mod mine_together {
 
         // update the user miner
         user_miner.owner = *aury_from_authority.key;
-        user_miner.miner_type = miner_index;
-        user_miner.cost = miner.cost;
+        user_miner.miner_type = miner.key();
+        user_miner.power = power;
         user_miner.duration = miner.duration;
-        user_miner
-            .mining_start_at
-            .extend([0].repeat(amount as usize));
-        user_miner.mine_index.extend([0].repeat(amount as usize));
-        user_miner.x_aury_amount.extend([0].repeat(amount as usize));
 
         // update the miner
         miner.total_purchased += amount;
@@ -128,25 +144,22 @@ pub mod mine_together {
         ctx: Context<CreateMine>,
         _nonce_mine_together: u8,
         _nonce_mine: u8,
+        name: String,
         fee: u64,
     ) -> ProgramResult {
         if !(fee >= MIN_MINE_FEE && fee <= MAX_MINE_FEE) {
             return Err(ErrorCode::InvalidMineFee.into());
         }
 
-        let mine_together = &mut ctx.accounts.mine_together_account;
         let mine = &mut ctx.accounts.mine_account;
         let fee_to = &ctx.accounts.fee_to;
         let owner = &ctx.accounts.owner;
 
         // update the mine
-        mine.index = mine_together.mine_counter;
         mine.owner = *owner.key;
+        mine.name = name;
         mine.fee = fee;
         mine.fee_to = fee_to.key();
-
-        // update the mine together
-        mine_together.mine_counter += 1;
 
         Ok(())
     }
@@ -214,7 +227,7 @@ pub mod mine_together {
         mine.total_amount += amount;
 
         // update mine shares
-        if mine.shares.len() == 400 {
+        if mine.shares.len() == SHARES_LIMIT {
             mine.shares.remove(0);
         }
         let aury_share = AuryShare {
@@ -227,54 +240,36 @@ pub mod mine_together {
         Ok(())
     }
 
-    pub fn add_miners_to_mine<'a, 'b, 'c, 'info>(
-        ctx: Context<'a, 'b, 'c, 'info, AddMinersToMine<'info>>,
+    pub fn add_miners_to_mine(
+        ctx: Context<AddMinersToMine>,
         mine_index: u32,
         _nonce_mine: u8,
-        amount: Vec<u64>,
+        _miner_index: u32,
+        _nonce_user_miner: u8,
     ) -> ProgramResult {
         let mine = &mut ctx.accounts.mine_account;
-        let owner = &ctx.accounts.owner;
-        let remaining_accounts = ctx.remaining_accounts;
-        let remaining_accounts_length = ctx.remaining_accounts.len();
+        let user_miner = &mut ctx.accounts.user_miner_account;
         let now = Clock::get().unwrap().unix_timestamp as u64;
 
-        if !(remaining_accounts_length == amount.len()) {
-            return Err(ErrorCode::InvalidAccounts.into());
+        if mine.total_amount == 0 || mine.x_total_amount == 0 {
+            mine.x_total_amount += user_miner.power;
+            user_miner.x_aury_amount += user_miner.power;
+        } else {
+            let what: u64 = (user_miner.power as u128)
+                .checked_mul(mine.x_total_amount as u128)
+                .unwrap()
+                .checked_div(mine.total_amount as u128)
+                .unwrap()
+                .try_into()
+                .unwrap();
+
+            mine.x_total_amount += what;
+            user_miner.x_aury_amount += what;
         }
-
-        let mut index = 0;
-        while index < remaining_accounts_length {
-            let user_miner =
-                &mut Account::<'_, UserMinerAccount>::try_from(&remaining_accounts[index])?;
-            user_miner.assert_owner(owner)?;
-
-            for _ in 0..amount[index] {
-                let at = user_miner.available_miner_at()?;
-
-                if mine.total_amount == 0 || mine.x_total_amount == 0 {
-                    mine.x_total_amount += user_miner.cost;
-                    user_miner.x_aury_amount[at] += user_miner.cost;
-                } else {
-                    let what: u64 = (user_miner.cost as u128)
-                        .checked_mul(mine.x_total_amount as u128)
-                        .unwrap()
-                        .checked_div(mine.total_amount as u128)
-                        .unwrap()
-                        .try_into()
-                        .unwrap();
-
-                    mine.x_total_amount += what;
-                    user_miner.x_aury_amount[at] += what;
-                }
-                mine.power += user_miner.cost;
-                mine.total_amount += user_miner.cost;
-                user_miner.mine_index[at] = mine_index;
-                user_miner.mining_start_at[at] = now;
-            }
-
-            index += 1;
-        }
+        mine.power += user_miner.power;
+        mine.total_amount += user_miner.power;
+        user_miner.mine_index = mine_index;
+        user_miner.mining_start_at = now;
 
         Ok(())
     }
@@ -286,24 +281,20 @@ pub mod mine_together {
         _miner_index: u32,
         _nonce_user_miner: u8,
         nonce_aury_vault: u8,
-        user_miner_index: usize,
     ) -> ProgramResult {
         let mine = &mut ctx.accounts.mine_account;
         let user_miner = &mut ctx.accounts.user_miner_account;
         let aury_vault = &mut ctx.accounts.aury_vault;
         let aury_to = &mut ctx.accounts.aury_to;
         let fee_to = &mut ctx.accounts.fee_to;
-        let aury_to_authority = &ctx.accounts.aury_to_authority;
         let token_program = &ctx.accounts.token_program;
 
-        user_miner.assert_owner(aury_to_authority)?;
-        user_miner.assert_claimable(user_miner_index, mine_index)?;
+        user_miner.assert_claimable(mine_index)?;
 
         // determine user reward amount
-        let x_aury = user_miner.x_aury_amount[user_miner_index];
-        let mut what = user_miner.cost;
-        let mining_end_timestamp =
-            user_miner.mining_start_at[user_miner_index] + user_miner.duration;
+        let x_aury = user_miner.x_aury_amount;
+        let mut what = user_miner.power;
+        let mining_end_timestamp = user_miner.mining_start_at + user_miner.duration;
 
         for share in mine.shares.iter().rev() {
             if share.timestamp <= mining_end_timestamp {
@@ -317,11 +308,6 @@ pub mod mine_together {
                 break;
             }
         }
-
-        // update user_miner
-        user_miner.mining_start_at.remove(user_miner_index);
-        user_miner.mine_index.remove(user_miner_index);
-        user_miner.x_aury_amount.remove(user_miner_index);
 
         // compute aury vault account signer seeds
         let aury_mint_key = ctx.accounts.aury_mint.key();
@@ -361,7 +347,7 @@ pub mod mine_together {
         // update mine
         mine.total_amount -= what;
         mine.x_total_amount -= x_aury;
-        mine.power -= user_miner.cost;
+        mine.power -= user_miner.power;
 
         Ok(())
     }
@@ -430,6 +416,16 @@ pub struct CreateMiner<'info> {
         payer = admin,
         seeds = [ mine_together_account.miner_counter.to_string().as_ref(), constants::MINER_PDA_SEED.as_ref() ],
         bump = _nonce_miner,
+        // 8: account's signature
+        // 4: index
+        // 4: name len
+        // 1 * 50: name max-len 50
+        // 8: cost
+        // 8: duration
+        // 8: limit
+        // 8: total_purchased
+        // 1: frozen_sells
+        space = 8 + 4 + (4 + 50) + 8 + 8 + 8 + 8 + 1,
     )]
     pub miner_account: Box<Account<'info, MinerAccount>>,
 
@@ -441,9 +437,30 @@ pub struct CreateMiner<'info> {
 
 #[derive(Accounts)]
 #[instruction(_nonce_mine_together: u8, _miner_index: u32, _nonce_miner: u8)]
-pub struct RemoveMiner<'info> {
+pub struct FreezeMiner<'info> {
+    #[account(
+        seeds = [ constants::MINE_TOGETHER_PDA_SEED.as_ref() ],
+        bump = _nonce_mine_together,
+        constraint = !mine_together_account.freeze_program @ ErrorCode::ProgramFreezed
+    )]
+    pub mine_together_account: Box<Account<'info, MineTogetherAccount>>,
+
     #[account(
         mut,
+        seeds = [ _miner_index.to_string().as_ref(), constants::MINER_PDA_SEED.as_ref() ],
+        bump = _nonce_miner,
+    )]
+    pub miner_account: Box<Account<'info, MinerAccount>>,
+
+    pub admin: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(_nonce_mine_together: u8, _miner_index: u32, _nonce_miner: u8)]
+pub struct RemoveMiner<'info> {
+    #[account(
         seeds = [ constants::MINE_TOGETHER_PDA_SEED.as_ref() ],
         bump = _nonce_mine_together,
         constraint = !mine_together_account.freeze_program @ ErrorCode::ProgramFreezed
@@ -459,12 +476,10 @@ pub struct RemoveMiner<'info> {
     pub miner_account: Box<Account<'info, MinerAccount>>,
 
     pub admin: Signer<'info>,
-
-    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-#[instruction(_nonce_mine_together: u8, miner_index: u32, _nonce_miner: u8, _nonce_user_miner: u8, _nonce_aury_vault: u8)]
+#[instruction(_nonce_mine_together: u8, _miner_index: u32, _nonce_miner: u8, _nonce_user_miner: u8, _nonce_aury_vault: u8)]
 pub struct PurchaseMiner<'info> {
     #[account(
         seeds = [ constants::MINE_TOGETHER_PDA_SEED.as_ref() ],
@@ -475,28 +490,16 @@ pub struct PurchaseMiner<'info> {
 
     #[account(
         mut,
-        seeds = [ miner_index.to_string().as_ref(), constants::MINER_PDA_SEED.as_ref() ],
+        seeds = [ _miner_index.to_string().as_ref(), constants::MINER_PDA_SEED.as_ref() ],
         bump = _nonce_miner,
     )]
     pub miner_account: Box<Account<'info, MinerAccount>>,
 
     #[account(
-        init_if_needed,
+        init,
         payer = aury_from_authority,
-        seeds = [ miner_index.to_string().as_ref(), constants::MINER_PDA_SEED.as_ref(), aury_from_authority.key().as_ref() ],
+        seeds = [ _miner_index.to_string().as_ref(), constants::MINER_PDA_SEED.as_ref(), aury_from_authority.key().as_ref() ],
         bump = _nonce_user_miner,
-        // 8: account's signature
-        // 32: owner
-        // 4: miner_type
-        // 8: cost
-        // 8: duration
-        // 4: mining_start_at vec len
-        // 8 * 300: mining_start_at limit 300
-        // 4: mine_index vec len
-        // 4 * 300: mine_index limit 300
-        // 4: x_aury_amount vec len
-        // 8 * 300: x_aury_amount limit 300
-        space = 8 + 32 + 4 + 8 + 8 + (4 + 8 * 300) + (4 + 4 * 300) + (4 + 8 * 300),
     )]
     pub user_miner_account: Box<Account<'info, UserMinerAccount>>,
 
@@ -526,7 +529,6 @@ pub struct PurchaseMiner<'info> {
 #[instruction(_nonce_mine_together: u8, _nonce_mine: u8)]
 pub struct CreateMine<'info> {
     #[account(
-        mut,
         seeds = [ constants::MINE_TOGETHER_PDA_SEED.as_ref() ],
         bump = _nonce_mine_together,
         constraint = !mine_together_account.freeze_program @ ErrorCode::ProgramFreezed
@@ -536,11 +538,12 @@ pub struct CreateMine<'info> {
     #[account(
         init,
         payer = owner,
-        seeds = [ mine_together_account.mine_counter.to_string().as_ref(), constants::MINE_PDA_SEED.as_ref() ],
+        seeds = [ owner.key().as_ref(), constants::MINE_PDA_SEED.as_ref() ],
         bump = _nonce_mine,
         // 8: account's signature
-        // 4: index
         // 32: owner
+        // 4: name len
+        // 1 * 50: name max-len 50
         // 8: fee
         // 32: fee_to
         // 8: power
@@ -551,7 +554,7 @@ pub struct CreateMine<'info> {
         // 8: timestamp
         // 8: token amount
         // 8: x token amount
-        space = 8 + 4 + 32 + 8 + 32 + 8 + 8 + 8 + (4 + (8 + 8 + 8) * 400),
+        space = 8 + 32 + (4 + 50) + 8 + 32 + 8 + 8 + 8 + (4 + (8 + 8 + 8) * SHARES_LIMIT),
     )]
     pub mine_account: Box<Account<'info, MineAccount>>,
 
@@ -634,7 +637,7 @@ pub struct RewardToMine<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(mine_index: u32, _nonce_mine: u8)]
+#[instruction(mine_index: u32, _nonce_mine: u8, _miner_index: u32, _nonce_user_miner: u8)]
 pub struct AddMinersToMine<'info> {
     #[account(
         mut,
@@ -642,6 +645,13 @@ pub struct AddMinersToMine<'info> {
         bump = _nonce_mine,
     )]
     pub mine_account: Box<Account<'info, MineAccount>>,
+
+    #[account(
+        mut,
+        seeds = [ _miner_index.to_string().as_ref(), constants::MINER_PDA_SEED.as_ref(), owner.key().as_ref() ],
+        bump = _nonce_user_miner,
+    )]
+    pub user_miner_account: Box<Account<'info, UserMinerAccount>>,
 
     pub owner: Signer<'info>,
 }
@@ -658,6 +668,7 @@ pub struct ClaimMiner<'info> {
 
     #[account(
         mut,
+        close = aury_to_authority,
         seeds = [ _miner_index.to_string().as_ref(), constants::MINER_PDA_SEED.as_ref(), aury_to_authority.key().as_ref() ],
         bump = _nonce_user_miner,
     )]
@@ -694,7 +705,6 @@ pub struct ClaimMiner<'info> {
 pub struct MineTogetherAccount {
     pub admin_key: Pubkey,
     pub freeze_program: bool,
-    pub mine_counter: u32,
     pub miner_counter: u32,
 }
 
@@ -708,8 +718,8 @@ pub struct AuryShare {
 #[account]
 #[derive(Default)]
 pub struct MineAccount {
-    pub index: u32,
     pub owner: Pubkey,
+    pub name: String,
     pub fee: u64,
     pub fee_to: Pubkey,
     pub power: u64,
@@ -722,22 +732,24 @@ pub struct MineAccount {
 #[derive(Default)]
 pub struct MinerAccount {
     pub index: u32,
+    pub name: String,
     pub cost: u64,
     pub duration: u64,
     pub limit: u64,
     pub total_purchased: u64,
+    pub frozen_sells: bool,
 }
 
 #[account]
 #[derive(Default)]
 pub struct UserMinerAccount {
     pub owner: Pubkey,
-    pub miner_type: u32,
-    pub cost: u64,
+    pub miner_type: Pubkey,
+    pub power: u64,
     pub duration: u64,
-    pub mining_start_at: Vec<u64>,
-    pub mine_index: Vec<u32>,
-    pub x_aury_amount: Vec<u64>,
+    pub mining_start_at: u64,
+    pub mine_index: u32,
+    pub x_aury_amount: u64,
 }
 
 impl MineTogetherAccount {
@@ -762,6 +774,10 @@ impl MineAccount {
 
 impl MinerAccount {
     pub fn assert_purchasable(&self, amount: u64) -> ProgramResult {
+        if self.frozen_sells {
+            return Err(ErrorCode::MinerFrozenSells.into());
+        }
+
         if self.limit > 0 && self.total_purchased + amount > self.limit {
             return Err(ErrorCode::MinerPurchaseLimit.into());
         }
@@ -771,42 +787,16 @@ impl MinerAccount {
 }
 
 impl UserMinerAccount {
-    pub fn assert_owner(&self, signer: &Signer) -> ProgramResult {
-        if self.owner != *signer.key {
-            return Err(ErrorCode::NotMinerOwner.into());
-        }
-
-        Ok(())
-    }
-
-    pub fn available_miner_at(&self) -> Result<usize> {
-        match self
-            .mining_start_at
-            .iter()
-            .position(|&start_at| start_at == 0)
-        {
-            Some(index) => {
-                return Ok(index);
-            }
-            None => {
-                return Err(ErrorCode::NonAvailableMiners.into());
-            }
-        }
-    }
-
-    pub fn assert_claimable(&self, index: usize, mine_index: u32) -> ProgramResult {
+    pub fn assert_claimable(&self, mine_index: u32) -> ProgramResult {
         let now = Clock::get().unwrap().unix_timestamp as u64;
 
-        if !(index < self.mining_start_at.len()) {
+        if !(self.mining_start_at > 0) {
             return Err(ErrorCode::ClaimUnavailable.into());
         }
-        if !(self.mining_start_at[index] > 0) {
+        if !(now >= (self.mining_start_at + self.duration)) {
             return Err(ErrorCode::ClaimUnavailable.into());
         }
-        if !((now - self.mining_start_at[index]) >= self.duration) {
-            return Err(ErrorCode::ClaimUnavailable.into());
-        }
-        if !(self.mine_index[index] == mine_index) {
+        if !(self.mine_index == mine_index) {
             return Err(ErrorCode::ClaimUnavailable.into());
         }
 
@@ -838,4 +828,6 @@ pub enum ErrorCode {
     ClaimUnavailable, // 6009, 0x1779
     #[msg("Invalid fee account")]
     InvalidFeeAccount, // 6010, 0x177a
+    #[msg("Miner frozen sells")]
+    MinerFrozenSells, // 6011, 0x177a
 }
