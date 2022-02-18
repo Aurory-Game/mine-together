@@ -266,7 +266,6 @@ pub mod mine_together {
             mine.x_total_amount += what;
             user_miner.x_aury_amount += what;
         }
-        mine.power += user_miner.power;
         mine.total_amount += user_miner.power;
         user_miner.mine_index = mine_index;
         user_miner.mining_start_at = now;
@@ -347,7 +346,6 @@ pub mod mine_together {
         // update mine
         mine.total_amount -= what;
         mine.x_total_amount -= x_aury;
-        mine.power -= user_miner.power;
 
         Ok(())
     }
@@ -722,7 +720,6 @@ pub struct MineAccount {
     pub name: String,
     pub fee: u64,
     pub fee_to: Pubkey,
-    pub power: u64,
     pub total_amount: u64,
     pub x_total_amount: u64,
     pub shares: Vec<AuryShare>,
