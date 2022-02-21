@@ -183,11 +183,23 @@ pub mod config {
     }
 
     #[access_control(ctx.accounts.mine_account.assert_owner(&ctx.accounts.owner))]
+    pub fn update_mine_owner(
+        ctx: Context<UpdateMineOwner>,
+        _nonce_mine: u8,
+        new_owner: Pubkey,
+    ) -> ProgramResult {
+        let mine_account = &mut ctx.accounts.mine_account;
+
+        mine_account.owner = new_owner;
+
+        Ok(())
+    }
+
+    #[access_control(ctx.accounts.mine_account.assert_owner(&ctx.accounts.owner))]
     pub fn update_mine(
         ctx: Context<UpdateMine>,
         _nonce_config: u8,
         _nonce_mine: u8,
-        owner: Pubkey,
         name: String,
         fee: u64,
     ) -> ProgramResult {
@@ -201,7 +213,6 @@ pub mod config {
         }
 
         // update the mine_account
-        mine_account.owner = owner;
         mine_account.name = name;
         mine_account.fee = fee;
         mine_account.fee_to = fee_to.key();
@@ -349,7 +360,7 @@ pub mod config {
         }
 
         // update mine_account
-        mine_account.total_amount -= (what + user_miner_account.power);
+        mine_account.total_amount -= what + user_miner_account.power;
         mine_account.x_total_amount -= x_aury;
 
         Ok(())
@@ -558,6 +569,19 @@ pub struct CreateMine<'info> {
 
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+#[instruction(_nonce_mine: u8)]
+pub struct UpdateMineOwner<'info> {
+    #[account(
+        mut,
+        seeds = [ owner.key().as_ref(), constants::MINE_PDA_SEED.as_ref() ],
+        bump = _nonce_mine,
+    )]
+    pub mine_account: Box<Account<'info, MineAccount>>,
+
+    pub owner: Signer<'info>,
 }
 
 #[derive(Accounts)]
