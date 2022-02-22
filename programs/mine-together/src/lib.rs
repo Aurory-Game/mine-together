@@ -30,18 +30,24 @@ pub mod config {
     use super::*;
 
     const FEE_MULTIPLIER: u64 = 10000; // 100%
-    pub const MAX_MINE_FEE: u64 = 5000; // 50%
-    pub const MIN_MINE_FEE: u64 = 1000; // 10%
 
     pub fn initialize(
         ctx: Context<Initialize>,
         _nonce_config: u8,
         _nonce_aury_vault: u8,
+        min_mine_fee: u64,
+        max_mine_fee: u64,
         mine_update_delay: u64,
     ) -> ProgramResult {
+        if !(min_mine_fee > 0 && min_mine_fee < max_mine_fee && max_mine_fee < FEE_MULTIPLIER) {
+            return Err(ErrorCode::InvalidMineFee.into());
+        }
+
         let config_account = &mut ctx.accounts.config_account;
 
         config_account.admin_key = *ctx.accounts.initializer.key;
+        config_account.min_mine_fee = min_mine_fee;
+        config_account.max_mine_fee = max_mine_fee;
         config_account.mine_update_delay = mine_update_delay;
 
         Ok(())
@@ -70,13 +76,24 @@ pub mod config {
     }
 
     #[access_control(ctx.accounts.config_account.assert_admin(&ctx.accounts.admin))]
-    pub fn update_mine_update_delay(
+    pub fn update_config_mine(
         ctx: Context<UpdateConfig>,
         _nonce_config: u8,
+        new_min_mine_fee: u64,
+        new_max_mine_fee: u64,
         new_mine_update_delay: u64,
     ) -> ProgramResult {
+        if !(new_min_mine_fee > 0
+            && new_min_mine_fee < new_max_mine_fee
+            && new_max_mine_fee < FEE_MULTIPLIER)
+        {
+            return Err(ErrorCode::InvalidMineFee.into());
+        }
+
         let config_account = &mut ctx.accounts.config_account;
 
+        config_account.min_mine_fee = new_min_mine_fee;
+        config_account.max_mine_fee = new_max_mine_fee;
         config_account.mine_update_delay = new_mine_update_delay;
 
         Ok(())
@@ -165,13 +182,12 @@ pub mod config {
         name: String,
         fee: u64,
     ) -> ProgramResult {
-        if !(fee >= MIN_MINE_FEE && fee <= MAX_MINE_FEE) {
-            return Err(ErrorCode::InvalidMineFee.into());
-        }
-
+        let config_account = &ctx.accounts.config_account;
         let mine_account = &mut ctx.accounts.mine_account;
         let fee_to = &ctx.accounts.fee_to;
         let owner = &ctx.accounts.owner;
+
+        config_account.assert_mine_fee(fee)?;
 
         // update the mine_account
         mine_account.owner = *owner.key;
@@ -207,10 +223,8 @@ pub mod config {
         let mine_account = &mut ctx.accounts.mine_account;
         let fee_to = &ctx.accounts.fee_to;
 
+        config_account.assert_mine_fee(fee)?;
         mine_account.assert_updatable(config_account.mine_update_delay)?;
-        if !(fee >= MIN_MINE_FEE && fee <= MAX_MINE_FEE) {
-            return Err(ErrorCode::InvalidMineFee.into());
-        }
 
         // update the mine_account
         mine_account.name = name;
@@ -703,6 +717,8 @@ pub struct ClaimMiner<'info> {
 pub struct ConfigAccount {
     pub admin_key: Pubkey,
     pub freeze_program: bool,
+    pub min_mine_fee: u64,
+    pub max_mine_fee: u64,
     pub mine_update_delay: u64,
 }
 
@@ -753,6 +769,14 @@ impl ConfigAccount {
     pub fn assert_admin(&self, signer: &Signer) -> ProgramResult {
         if self.admin_key != *signer.key {
             return Err(ErrorCode::NotAdmin.into());
+        }
+
+        Ok(())
+    }
+
+    pub fn assert_mine_fee(&self, fee: u64) -> ProgramResult {
+        if !(fee >= self.min_mine_fee && fee <= self.max_mine_fee) {
+            return Err(ErrorCode::InvalidMineFee.into());
         }
 
         Ok(())
