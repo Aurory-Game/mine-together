@@ -26,7 +26,7 @@ pub mod constants {
 }
 
 #[program]
-pub mod config {
+pub mod mine_together {
     use super::*;
 
     const FEE_MULTIPLIER: u64 = 10000; // 100%
