@@ -262,15 +262,17 @@ pub mod mine_together {
         mine_account.total_amount += amount;
 
         // update mine_account shares
-        if mine_account.shares.len() == constants::SHARES_LIMIT {
-            mine_account.shares.remove(0);
+        if mine_account.x_total_amount > 0 {
+            if mine_account.shares.len() == constants::SHARES_LIMIT {
+                mine_account.shares.remove(0);
+            }
+            let aury_share = AuryShare {
+                timestamp: Clock::get().unwrap().unix_timestamp as u64,
+                token_amount: mine_account.total_amount,
+                x_token_amount: mine_account.x_total_amount,
+            };
+            mine_account.shares.push(aury_share);
         }
-        let aury_share = AuryShare {
-            timestamp: Clock::get().unwrap().unix_timestamp as u64,
-            token_amount: mine_account.total_amount,
-            x_token_amount: mine_account.x_total_amount,
-        };
-        mine_account.shares.push(aury_share);
 
         Ok(())
     }
@@ -333,7 +335,11 @@ pub mod mine_together {
                     .unwrap()
                     .try_into()
                     .unwrap();
-                what -= user_miner_account.power;
+                if what > user_miner_account.power {
+                    what -= user_miner_account.power;
+                } else {
+                    what = 0;
+                }
                 break;
             }
         }
@@ -374,7 +380,10 @@ pub mod mine_together {
         }
 
         // update mine_account
-        mine_account.total_amount -= what + user_miner_account.power;
+        mine_account.total_amount = mine_account
+            .total_amount
+            .checked_sub(what + user_miner_account.power)
+            .unwrap();
         mine_account.x_total_amount -= x_aury;
 
         Ok(())
@@ -819,12 +828,7 @@ impl MinerAccount {
 
 impl UserMinerAccount {
     pub fn assert_claimable(&self, mine_key: Pubkey) -> ProgramResult {
-        let now = Clock::get().unwrap().unix_timestamp as u64;
-
         if !(self.mining_start_at > 0) {
-            return Err(ErrorCode::ClaimUnavailable.into());
-        }
-        if !(now >= (self.mining_start_at + self.duration)) {
             return Err(ErrorCode::ClaimUnavailable.into());
         }
         if !(self.mine_key == mine_key) {
