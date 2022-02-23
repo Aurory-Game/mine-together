@@ -64,7 +64,7 @@ describe('mine-together', () => {
   // Miner
   let minerPubkey: PublicKey[] = [];
   let minerBump: number[] = [];
-  let minerCount = 2;
+  let minerCount = 3;
   const minerName = [
     'Miner-A',
     'Miner-B',
@@ -346,16 +346,28 @@ describe('mine-together', () => {
       const userMinerAccount = await program.account.userMinerAccount.fetch(
         aliceUserMinerPubkey[0]
       );
-      expect(userMinerAccount.owner.toString(), alicePubkey.toString());
-      expect(userMinerAccount.minerType.toString(), minerPubkey[0].toString());
-      expect(userMinerAccount.power.toNumber(), 50_000_000_000);
-      expect(userMinerAccount.duration.toNumber(), minerDuration[0].toNumber());
-      expect(userMinerAccount.miningStartAt.toNumber(), 0);
-      expect(userMinerAccount.mineKey.toString(), PublicKey.default.toString());
-      expect(userMinerAccount.xAuryAmount.toNumber(), 0);
+      assert.equal(userMinerAccount.owner.toString(), alicePubkey.toString());
+      assert.equal(
+        userMinerAccount.minerType.toString(),
+        minerPubkey[0].toString()
+      );
+      assert.equal(userMinerAccount.power.toNumber(), 50_000_000_000);
+      assert.equal(
+        userMinerAccount.duration.toNumber(),
+        minerDuration[0].toNumber()
+      );
+      assert.equal(userMinerAccount.miningStartAt.toNumber(), 0);
+      assert.equal(
+        userMinerAccount.mineKey.toString(),
+        PublicKey.default.toString()
+      );
+      assert.equal(userMinerAccount.xAuryAmount.toNumber(), 0);
 
-      expect(await getTokenBalance(aliceAuryTokenAccount), 950_000_000_000);
-      expect(await getTokenBalance(auryVaultPubkey), 50_000_000_000);
+      assert.equal(
+        await getTokenBalance(aliceAuryTokenAccount),
+        950_000_000_000
+      );
+      assert.equal(await getTokenBalance(auryVaultPubkey), 50_000_000_000);
     });
 
     it('Purchase limited miner - failed', async () => {
@@ -414,16 +426,28 @@ describe('mine-together', () => {
       const userMinerAccount = await program.account.userMinerAccount.fetch(
         aliceUserMinerPubkey[1]
       );
-      expect(userMinerAccount.owner.toString(), alicePubkey.toString());
-      expect(userMinerAccount.minerType.toString(), minerPubkey[1].toString());
-      expect(userMinerAccount.power.toNumber(), 40_000_000_000);
-      expect(userMinerAccount.duration.toNumber(), minerDuration[1].toNumber());
-      expect(userMinerAccount.miningStartAt.toNumber(), 0);
-      expect(userMinerAccount.mineKey.toString(), PublicKey.default.toString());
-      expect(userMinerAccount.xAuryAmount.toNumber(), 0);
+      assert.equal(userMinerAccount.owner.toString(), alicePubkey.toString());
+      assert.equal(
+        userMinerAccount.minerType.toString(),
+        minerPubkey[1].toString()
+      );
+      assert.equal(userMinerAccount.power.toNumber(), 40_000_000_000);
+      assert.equal(
+        userMinerAccount.duration.toNumber(),
+        minerDuration[1].toNumber()
+      );
+      assert.equal(userMinerAccount.miningStartAt.toNumber(), 0);
+      assert.equal(
+        userMinerAccount.mineKey.toString(),
+        PublicKey.default.toString()
+      );
+      assert.equal(userMinerAccount.xAuryAmount.toNumber(), 0);
 
-      expect(await getTokenBalance(aliceAuryTokenAccount), 910_000_000_000);
-      expect(await getTokenBalance(auryVaultPubkey), 90_000_000_000);
+      assert.equal(
+        await getTokenBalance(aliceAuryTokenAccount),
+        910_000_000_000
+      );
+      assert.equal(await getTokenBalance(auryVaultPubkey), 90_000_000_000);
     });
   });
 
@@ -452,14 +476,17 @@ describe('mine-together', () => {
       });
 
       const mineAccount = await program.account.mineAccount.fetch(minePubkey);
-      expect(mineAccount.owner.toString(), alicePubkey.toString());
-      expect(mineAccount.name, mineName);
-      expect(mineAccount.fee.toNumber(), mineFee.toNumber());
-      expect(mineAccount.feeTo.toString(), aliceAuryTokenAccount.toString());
-      expect(mineAccount.totalAmount.toNumber(), 0);
-      expect(mineAccount.xTotalAmount.toNumber(), 0);
-      expect(mineAccount.lastUpdatedAt.toNumber(), 0);
-      expect(mineAccount.shares.toString(), [].toString());
+      assert.equal(mineAccount.owner.toString(), alicePubkey.toString());
+      assert.equal(mineAccount.name, mineName);
+      assert.equal(mineAccount.fee.toNumber(), mineFee.toNumber());
+      assert.equal(
+        mineAccount.feeTo.toString(),
+        aliceAuryTokenAccount.toString()
+      );
+      assert.equal(mineAccount.totalAmount.toNumber(), 0);
+      assert.equal(mineAccount.xTotalAmount.toNumber(), 0);
+      assert.equal(mineAccount.lastUpdatedAt.toNumber(), 0);
+      assert.equal(mineAccount.shares.toString(), [].toString());
     });
 
     it('Create mine again - failed', async () => {
@@ -488,10 +515,13 @@ describe('mine-together', () => {
       });
 
       const mineAccount = await program.account.mineAccount.fetch(minePubkey);
-      expect(mineAccount.owner.toString(), alicePubkey.toString());
-      expect(mineAccount.name, mineName);
-      expect(mineAccount.fee.toNumber(), mineFee.toNumber());
-      expect(mineAccount.feeTo.toString(), bobAuryTokenAccount.toString());
+      assert.equal(mineAccount.owner.toString(), alicePubkey.toString());
+      assert.equal(mineAccount.name, mineName);
+      assert.equal(mineAccount.fee.toNumber(), mineFee.toNumber());
+      assert.equal(
+        mineAccount.feeTo.toString(),
+        bobAuryTokenAccount.toString()
+      );
     });
 
     it('Update mine owner', async () => {
@@ -503,7 +533,353 @@ describe('mine-together', () => {
       });
 
       const mineAccount = await program.account.mineAccount.fetch(minePubkey);
-      expect(mineAccount.owner.toString(), bobPubkey.toString());
+      assert.equal(mineAccount.owner.toString(), bobPubkey.toString());
+    });
+  });
+
+  describe('Add miners / reward to mine', () => {
+    it('add alice miner-A to mine', async () => {
+      const lowerDate = Math.floor(Date.now() / 1000 - 1);
+
+      await program.rpc.addMinersToMine(aliceUserMinerBump[0], {
+        accounts: {
+          mineAccount: minePubkey,
+          userMinerAccount: aliceUserMinerPubkey[0],
+          owner: alicePubkey,
+        },
+      });
+
+      const upperDate = Math.ceil(Date.now() / 1000 + 1);
+
+      const mineAccount = await program.account.mineAccount.fetch(minePubkey);
+      assert.equal(mineAccount.totalAmount.toNumber(), 50_000_000_000);
+      assert.equal(mineAccount.xTotalAmount.toNumber(), 50_000_000_000);
+
+      const userMinerAccount = await program.account.userMinerAccount.fetch(
+        aliceUserMinerPubkey[0]
+      );
+      assert.equal(userMinerAccount.xAuryAmount.toNumber(), 50_000_000_000);
+      assert.equal(userMinerAccount.mineKey.toString(), minePubkey.toString());
+      expect(userMinerAccount.miningStartAt.toNumber()).to.be.at.least(
+        lowerDate
+      );
+      expect(userMinerAccount.miningStartAt.toNumber()).to.be.at.most(
+        upperDate
+      );
+    });
+
+    it('Reward to mine', async () => {
+      const lowerDate = Math.floor(Date.now() / 1000 - 1);
+
+      await program.rpc.rewardToMine(
+        configBump,
+        auryVaultBump,
+        new anchor.BN(5_000_000_000),
+        {
+          accounts: {
+            configAccount: configPubkey,
+            mineAccount: minePubkey,
+            auryMint: auryMintPubkey,
+            auryVault: auryVaultPubkey,
+            auryFrom: aliceAuryTokenAccount,
+            admin: alicePubkey,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          },
+        }
+      );
+
+      const upperDate = Math.ceil(Date.now() / 1000 + 1);
+
+      const mineAccount = await program.account.mineAccount.fetch(minePubkey);
+      assert.equal(mineAccount.totalAmount.toNumber(), 55_000_000_000);
+      assert.equal(mineAccount.xTotalAmount.toNumber(), 50_000_000_000);
+
+      const shares = mineAccount.shares as {
+        timestamp;
+        tokenAmount;
+        xTokenAmount;
+      }[];
+      assert.equal(shares.length, 1);
+      expect(shares[0].timestamp.toNumber()).to.be.at.least(lowerDate);
+      expect(shares[0].timestamp.toNumber()).to.be.at.most(upperDate);
+      assert.equal(shares[0].tokenAmount.toNumber(), 55_000_000_000);
+      assert.equal(shares[0].xTokenAmount.toNumber(), 50_000_000_000);
+
+      assert.equal(await getTokenBalance(auryVaultPubkey), 95_000_000_000);
+      assert.equal(
+        await getTokenBalance(aliceAuryTokenAccount),
+        905_000_000_000
+      );
+    });
+
+    it('add alice miner-B to mine', async () => {
+      const lowerDate = Math.floor(Date.now() / 1000 - 1);
+
+      await program.rpc.addMinersToMine(aliceUserMinerBump[1], {
+        accounts: {
+          mineAccount: minePubkey,
+          userMinerAccount: aliceUserMinerPubkey[1],
+          owner: alicePubkey,
+        },
+      });
+
+      const upperDate = Math.ceil(Date.now() / 1000 + 1);
+
+      const mineAccount = await program.account.mineAccount.fetch(minePubkey);
+      assert.equal(mineAccount.totalAmount.toNumber(), 95_000_000_000);
+      assert.equal(mineAccount.xTotalAmount.toNumber(), 86_363_636_363); // 36_363_636_363 = 40_000_000_000 * 5 / 5.5
+
+      const userMinerAccount = await program.account.userMinerAccount.fetch(
+        aliceUserMinerPubkey[1]
+      );
+      assert.equal(userMinerAccount.xAuryAmount.toNumber(), 36_363_636_363);
+      assert.equal(userMinerAccount.mineKey.toString(), minePubkey.toString());
+      expect(userMinerAccount.miningStartAt.toNumber()).to.be.at.least(
+        lowerDate
+      );
+      expect(userMinerAccount.miningStartAt.toNumber()).to.be.at.most(
+        upperDate
+      );
+    });
+
+    it('Reward to mine after miner-A duration (2s)', async () => {
+      await sleep(2000);
+
+      const lowerDate = Math.floor(Date.now() / 1000 - 1);
+
+      await program.rpc.rewardToMine(
+        configBump,
+        auryVaultBump,
+        new anchor.BN(5_000_000_000),
+        {
+          accounts: {
+            configAccount: configPubkey,
+            mineAccount: minePubkey,
+            auryMint: auryMintPubkey,
+            auryVault: auryVaultPubkey,
+            auryFrom: aliceAuryTokenAccount,
+            admin: alicePubkey,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          },
+        }
+      );
+
+      const upperDate = Math.ceil(Date.now() / 1000 + 1);
+
+      const mineAccount = await program.account.mineAccount.fetch(minePubkey);
+      assert.equal(mineAccount.totalAmount.toNumber(), 100_000_000_000);
+      assert.equal(mineAccount.xTotalAmount.toNumber(), 86_363_636_363);
+
+      const shares = mineAccount.shares as {
+        timestamp;
+        tokenAmount;
+        xTokenAmount;
+      }[];
+      assert.equal(shares.length, 2);
+      expect(shares[1].timestamp.toNumber()).to.be.at.least(lowerDate);
+      expect(shares[1].timestamp.toNumber()).to.be.at.most(upperDate);
+      assert.equal(shares[0].tokenAmount.toNumber(), 55_000_000_000);
+      assert.equal(shares[0].xTokenAmount.toNumber(), 50_000_000_000);
+      assert.equal(shares[1].tokenAmount.toNumber(), 100_000_000_000);
+      assert.equal(shares[1].xTokenAmount.toNumber(), 86_363_636_363);
+
+      assert.equal(await getTokenBalance(auryVaultPubkey), 100_000_000_000);
+      assert.equal(
+        await getTokenBalance(aliceAuryTokenAccount),
+        900_000_000_000
+      );
+    });
+  });
+
+  describe('Claim miner', async () => {
+    it('Claim alice miner-C - failed (not added)', async () => {
+      await program.rpc.purchaseMiner(
+        configBump,
+        aliceUserMinerBump[2],
+        auryVaultBump,
+        new anchor.BN(10),
+        {
+          accounts: {
+            configAccount: configPubkey,
+            minerAccount: minerPubkey[2],
+            userMinerAccount: aliceUserMinerPubkey[2],
+            auryMint: auryMintPubkey,
+            auryVault: auryVaultPubkey,
+            auryFrom: aliceAuryTokenAccount,
+            auryFromAuthority: alicePubkey,
+            systemProgram: anchor.web3.SystemProgram.programId,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+          },
+        }
+      );
+
+      assert.equal(await getTokenBalance(auryVaultPubkey), 400_000_000_000);
+      assert.equal(
+        await getTokenBalance(aliceAuryTokenAccount),
+        600_000_000_000
+      );
+
+      await assert.rejects(
+        async () => {
+          await program.rpc.claimMiner(aliceUserMinerBump[2], auryVaultBump, {
+            accounts: {
+              mineAccount: minePubkey,
+              userMinerAccount: aliceUserMinerPubkey[2],
+              auryMint: auryMintPubkey,
+              auryVault: auryVaultPubkey,
+              auryTo: aliceAuryTokenAccount,
+              feeTo: bobAuryTokenAccount,
+              auryToAuthority: alicePubkey,
+              tokenProgram: TOKEN_PROGRAM_ID,
+            },
+          });
+        },
+        {
+          code: 6009,
+          message: '6009: Claim unavailable',
+        }
+      );
+    });
+
+    it('Claim alice miner-A - failed (wrong feeTo)', async () => {
+      await assert.rejects(
+        async () => {
+          await program.rpc.claimMiner(aliceUserMinerBump[0], auryVaultBump, {
+            accounts: {
+              mineAccount: minePubkey,
+              userMinerAccount: aliceUserMinerPubkey[0],
+              auryMint: auryMintPubkey,
+              auryVault: auryVaultPubkey,
+              auryTo: aliceAuryTokenAccount,
+              feeTo: aliceAuryTokenAccount,
+              auryToAuthority: alicePubkey,
+              tokenProgram: TOKEN_PROGRAM_ID,
+            },
+          });
+        },
+        {
+          code: 6010,
+          message: '6010: Invalid fee account',
+        }
+      );
+    });
+
+    it('Claim alice miner-A - success', async () => {
+      await program.rpc.claimMiner(aliceUserMinerBump[0], auryVaultBump, {
+        accounts: {
+          mineAccount: minePubkey,
+          userMinerAccount: aliceUserMinerPubkey[0],
+          auryMint: auryMintPubkey,
+          auryVault: auryVaultPubkey,
+          auryTo: aliceAuryTokenAccount,
+          feeTo: bobAuryTokenAccount,
+          auryToAuthority: alicePubkey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        },
+      });
+
+      // TotalReward: 5_000_000_000
+      // Fee: 5_000_000_000 * 20% = 1_000_000_000
+      // UserReward: 4_000_000_000
+      // UserPower: 50_000_000_000
+      assert.equal(await getTokenBalance(auryVaultPubkey), 345_000_000_000);
+      assert.equal(
+        await getTokenBalance(aliceAuryTokenAccount),
+        654_000_000_000
+      );
+      assert.equal(await getTokenBalance(bobAuryTokenAccount), 1_000_000_000);
+
+      await assert.rejects(
+        async () => {
+          await program.account.userMinerAccount.fetch(aliceUserMinerPubkey[0]);
+        },
+        {
+          message:
+            'Account does not exist ' + aliceUserMinerPubkey[0].toString(),
+        }
+      );
+    });
+
+    it('Claim alice miner-B - success', async () => {
+      await program.rpc.claimMiner(aliceUserMinerBump[1], auryVaultBump, {
+        accounts: {
+          mineAccount: minePubkey,
+          userMinerAccount: aliceUserMinerPubkey[1],
+          auryMint: auryMintPubkey,
+          auryVault: auryVaultPubkey,
+          auryTo: aliceAuryTokenAccount,
+          feeTo: bobAuryTokenAccount,
+          auryToAuthority: alicePubkey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        },
+      });
+
+      // TotalReward: 2_105_263_157
+      // Fee: 2_105_263_157 * 20% = 421_052_632
+      // UserReward: 1_684_210_525
+      // UserPower: 40_000_000_000
+      assert.equal(await getTokenBalance(auryVaultPubkey), 302_894_736_843);
+      assert.equal(
+        await getTokenBalance(aliceAuryTokenAccount),
+        695_684_210_525
+      );
+      assert.equal(await getTokenBalance(bobAuryTokenAccount), 1_421_052_632);
+
+      await assert.rejects(
+        async () => {
+          await program.account.userMinerAccount.fetch(aliceUserMinerPubkey[1]);
+        },
+        {
+          message:
+            'Account does not exist ' + aliceUserMinerPubkey[1].toString(),
+        }
+      );
+    });
+  });
+
+  describe('Repurchase miner', async () => {
+    it('Purchase miner-A', async () => {
+      await program.rpc.purchaseMiner(
+        configBump,
+        aliceUserMinerBump[0],
+        auryVaultBump,
+        new anchor.BN(5),
+        {
+          accounts: {
+            configAccount: configPubkey,
+            minerAccount: minerPubkey[0],
+            userMinerAccount: aliceUserMinerPubkey[0],
+            auryMint: auryMintPubkey,
+            auryVault: auryVaultPubkey,
+            auryFrom: aliceAuryTokenAccount,
+            auryFromAuthority: alicePubkey,
+            systemProgram: anchor.web3.SystemProgram.programId,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+          },
+        }
+      );
+
+      const userMinerAccount = await program.account.userMinerAccount.fetch(
+        aliceUserMinerPubkey[0]
+      );
+      assert.equal(userMinerAccount.owner.toString(), alicePubkey.toString());
+      assert.equal(
+        userMinerAccount.minerType.toString(),
+        minerPubkey[0].toString()
+      );
+      assert.equal(userMinerAccount.power.toNumber(), 50_000_000_000);
+      assert.equal(
+        userMinerAccount.duration.toNumber(),
+        minerDuration[0].toNumber()
+      );
+      assert.equal(userMinerAccount.miningStartAt.toNumber(), 0);
+      assert.equal(
+        userMinerAccount.mineKey.toString(),
+        PublicKey.default.toString()
+      );
+      assert.equal(userMinerAccount.xAuryAmount.toNumber(), 0);
     });
   });
 });
